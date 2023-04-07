@@ -1,4 +1,5 @@
 import numpy as np
+import itertools
 
 
 X_AXIS = 8
@@ -64,10 +65,6 @@ class Chess():
         if board is None:
             self.setup_board()
 
-    # Returns an array of all possible moves in strings
-    def possible_moves(self):
-        print("nothing to do yet")
-
     def setup_board(self):
         self.board = _STARTING_BOARD
 
@@ -86,9 +83,14 @@ class Chess():
             piece_type = _PIECE_MAP[x % 10]
             piece_color = _COLOR_MAP[int(x / 10)]
 
-            self._find_moves_for_piece(i, piece_type, piece_color)
+            possible_moves = self._find_moves_for_piece(i, piece_type, piece_color)
 
             print("{}\t{}\t{}\t{}\n".format(i, self._lookup_square(i), piece_color, piece_type))
+            print("Possible Moves: ")
+            for i in range(len(possible_moves)):
+                x = possible_moves[i]
+                print("\t[{}]:\t{}\t{}".format(i, x, self._lookup_square(x)))
+
 
     def _lookup_square(self, i):
         x = i % X_AXIS
@@ -99,30 +101,86 @@ class Chess():
     def _rank(self, i):
         return _Y_MAP[int(i / Y_AXIS)]
 
+    def _rank_j(self, i):
+        return int(i / Y_AXIS)
+
     def _file(self, i):
         return _X_MAP[int(i / X_AXIS)]
 
-    def _find_moves_for_piece(self, i, ptype, pcolor):
+    def _file_j(self, i):
+        return int(i % X_AXIS)
 
+    # checks and returns the piece in the square if found
+    def _is_opposite_color(self, i, j):
+        return int(self.board.flatten()[i] / 10) != int(self.board.flatten()[j] / 10)
+
+    def _check_square(self, i):
+        return self.board.flatten()[i], self.board.flatten()[i] != 0
+
+    def _illegal_move_checker(self, i, j):
+        if j < 0:
+            return False
+        elif self.board.flatten()[j] != 0:
+            piece, found = self._check_square(j)
+            if self._is_opposite_color(i, j):
+                return True
+            else:
+                return False
+        else:
+            return True
+
+    # Returns an array of all possible moves in strings
+    def _find_moves_for_piece(self, i, ptype, pcolor):
+        possible_moves = []
         match ptype:
             case "pawn":
-                print("Current square: {}".format(i))
                 match pcolor:
                     case "white":
                         if self._rank(i) == "2":
-                            print("Pawn on second rank")
-                        pass
+                            possible_moves.append(self._adjust_coord(i, 0, 2))
+                        possible_moves.append(self._adjust_coord(i, 0, 1))
                     case "black":
                         if self._rank(i) == "7":
-                            print("Pawn on seventh rank")
-                        pass
-                    case _:
-                        print("This color was not implemented yet")
+                            possible_moves.append(self._adjust_coord(i, 0, -2))
+                        possible_moves.append(self._adjust_coord(i, 0, -1))
+            case "knight":
+                knight_moves = list(itertools.permutations([-2, -1, 1, 2], r=2))
+                for x in knight_moves:
+                    if x[0] == x[1] or x[0] == -1*x[1]:
+                        continue
+                    print(x)
+                    possible_moves.append(self._adjust_coord(i, x[0], x[1]))
+            case "bishop":
+                pass
             case _:
                 print("This piece was not implemented yet")
+                pass
 
-    def _adjust_coord(i, adjx, adjy):
-        # find current coord, add the adjustments on
+        # check and declare illegal moves
+        possible_moves = list(filter(lambda x: self._illegal_move_checker(i, x), possible_moves))
+
+
+        return possible_moves
+
+    def _adjust_coord(self, i, adjx, adjy):
+        # find current coord, add the adjustments on the board, returning the 
+        # index of the square
+
+        # Determine i's actual position
+        # position (x, y) = y * x_axis + x
+        x = self._file_j(i) + adjx
+        y = self._rank_j(i) + adjy
+
+        # Illegal moves
+        if x >= X_AXIS or y >= Y_AXIS or x < 0 or y < 0:
+            return -1
+
+        return y * X_AXIS + x
+
+
+
+
+
 
 
 def test_chess():
@@ -130,6 +188,6 @@ def test_chess():
 
     aChess = Chess()
 
-    aChess.show_board()
-
     aChess.find_moves()
+
+    aChess.show_board()

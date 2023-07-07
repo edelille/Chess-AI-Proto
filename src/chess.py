@@ -69,9 +69,10 @@ class Chess():
     def setup_board(self):
         self.board = _STARTING_BOARD
 
-    def show_board(self):
+    def show_board(self, board=None):
         # First reverse the chess board to print from the other side
-        for x in reversed(self.board):
+        tgtBoard = self.board if board is None else board
+        for x in reversed(tgtBoard):
             print("\t".join(str(y) for y in x))
 
 
@@ -103,6 +104,7 @@ class Chess():
             print("all moves: ", moves) #[self._lookup_square(x) for x in moves])
             self.whiteTurn = not self.whiteTurn
             return False
+
 
         match len(mstr):
             case 2: # anything here is a valid pawn move
@@ -149,6 +151,8 @@ class Chess():
                         self._move_piece(i, tgtI)
                     case _:
                         print("This piece was not implemented yet")
+            case 4:
+                # Usually a capture?
             case _:
                 print("invalid move length, must be between 2-5")
                 return
@@ -156,6 +160,18 @@ class Chess():
         self.moveHistory.append(mstr)
         self.boardHistory.append(self.board)
         self.whiteTurn = not self.whiteTurn
+
+        enemyMoves = self._find_moves_for_color("white" if self.whiteTurn else "black")
+
+        # Catch for checkmate and stalemate
+        if len(enemyMoves) == 0:
+            # check for checkmate first
+            if self._illegal_board_checker(0, 0):
+                print("This is just stalemate :)")
+                return
+            else:
+                self._enter_checkmate()
+                return
 
     def _move_piece(self, fromI, toI, test=False):
         tempBoard = self.board.copy()
@@ -253,15 +269,15 @@ class Chess():
         else:
             return True
 
-    def _boundary_move_checker(self, i, j):
+    def _boundary_move_checker(self, i, j, altColor=False):
         if j < 0 or i == j:
             return False
         elif self.board.flatten()[j] != 0:
             piece, found = self._check_square(j)
             if self._is_opposite_color(i, j):
-                return True
+                return False if altColor else True
             else:
-                return False
+                return True if altColor else False
         else:
             return True
 
@@ -276,29 +292,40 @@ class Chess():
         if len(whereKing[0]) == 0: # king is not found, return false
             return False
         tgtI = whereKing[0][0]
-        print("King found on ", self._lookup_square(tgtI))
 
         enemyColor = _BLACK if self.whiteTurn else _WHITE
 
         # Find all the knights first
-        kMoves = self._find_knight_moves(tgtI)
+        nMoves = self._find_knight_moves(tgtI, altColor=True)
         tgtKnight = _KNIGHT + enemyColor
-        for x in kMoves:
+        for x in nMoves:
             if flat_testBoard[x] == tgtKnight:
                 return False
 
         # Find all straight viewers
         tgtQueen = _QUEEN + enemyColor
         tgtRook = _ROOK + enemyColor
-        rMoves = self._find_rook_moves(tgtI)
+        rMoves = self._find_rook_moves(tgtI, altColor=True)
         for x in rMoves:
             if flat_testBoard[x] in [tgtQueen, tgtRook]:
-                print("Broke on king put in check by rook move", flat_testBoard[x])
-                print([self._lookup_square(x) for x in rMoves])
+                return False
+
+        # Find all diagonal viewers
+        tgtBishop = _BISHOP + enemyColor
+        bMoves = self._find_bishop_moves(tgtI, altColor=True)
+        for x in bMoves:
+            if flat_testBoard[x] in [tgtQueen, tgtBishop]:
+                return False
+
+        # Find all direct touchers now
+        tgtPawn = _PAWN + enemyColor
+        tgtKing = _PAWN + enemyColor
+        kMoves = self._find_king_moves(tgtI, altColor=True)
+        for x in kMoves:
+            if flat_testBoard[x] in [tgtQueen, tgtBishop]:
                 return False
 
         return True
-
 
     def _find_moves_for_color(self, color):
         move_list = []
@@ -331,7 +358,6 @@ class Chess():
             case _:
                 print("This color has not been implemented yet")
 
-        print("piece_list for {}".format(color))
         for x in piece_list:
             debug=False #x['piece'] == 'king'
             if debug:
@@ -372,19 +398,26 @@ class Chess():
 
         return possible_moves
 
-    def _find_pawn_moves(self, i):
+    def _find_pawn_moves(self, i, altColor=False):
         moves = []
+        direction = 0
+
+        # Now check squares in front and to the diagonals, including the first move
         if self.whiteTurn:
             if self._rank(i) == "2":
                 moves.append(self._adjust_coord(i, 0, 2))
-            moves.append(self._adjust_coord(i, 0, 1))
+            direction = 1
         else:
             if self._rank(i) == "7":
                 moves.append(self._adjust_coord(i, 0, -2))
-            moves.append(self._adjust_coord(i, 0, -1))
+            direction = -1
+        nMoves = [(-1, direction), (0, direction), (1, direction)]
+        for x in nMoves:
+            moves.append(self._adjust_coord(i, x[0], x[1]))
+
         return moves
 
-    def _find_knight_moves(self,i):
+    def _find_knight_moves(self,i, altColor=False):
         moves = []
         knight_moves = list(itertools.permutations([-2, -1, 1, 2], r=2))
         for x in knight_moves:
@@ -393,7 +426,7 @@ class Chess():
             moves.append(self._adjust_coord(i, x[0], x[1]))
         return moves
 
-    def _find_bishop_moves(self, i):
+    def _find_bishop_moves(self, i, altColor=False):
         moves = []
         directions = list(itertools.product([1, -1], repeat=2))
         for x in directions:
@@ -402,14 +435,14 @@ class Chess():
                 tgtI = self._adjust_coord(i, j * x[0], j * x[1])
                 if tgtI < 0:
                     break
-                if self._boundary_move_checker(i, tgtI):
+                if self._boundary_move_checker(i, tgtI, altColor=altColor):
                     moves.append(tgtI)
                 else:
                     break
                 j += 1
         return moves
 
-    def _find_rook_moves(self, i):
+    def _find_rook_moves(self, i, altColor=False):
         moves = []
         directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
         for x in directions:
@@ -425,17 +458,17 @@ class Chess():
                 j += 1
         return moves
 
-    def _find_queen_moves(self, i):
+    def _find_queen_moves(self, i, altColor=False):
         return self._find_rook_moves(i) + self._find_bishop_moves(i)
 
-    def _find_king_moves(self, i):
+    def _find_king_moves(self, i, altColor=False):
         moves = []
         directions = list(itertools.product([-1, 0, 1], repeat=2))
         for x in directions:
             tgtI = self._adjust_coord(i, x[0], x[1])
             if tgtI < 0:
                 continue
-            if self._illegal_move_checker(i, tgtI):
+            if self._boundary_move_checker(i, tgtI):
                 moves.append(tgtI)
         return moves
 
@@ -454,6 +487,12 @@ class Chess():
 
         return y * X_AXIS + x
 
+    def _enter_checkmate(self):
+        losingColor = "white" if self.whiteTurn else "black"
+        winningColor = "black" if self.whiteTurn else "white"
+        print("This is checkmate on the {} position".format(losingColor))
+        print("Congratulations to {}".format(winningColor))
+
 def test_chess():
     print("[DEBUG] Testing Chess")
 
@@ -467,10 +506,18 @@ def test_chess():
         "Qf3",
         "D6",
         "Nc3",
-        "Rb8"
+        "H6",
+        "Qf7",
     ]
 
-    line = scholars_mate
+    pawn_captures = [
+        "D4",
+        "E5",
+        "E5"
+    ]
+
+    #line = scholars_mate
+    line = pawn_captures
 
     for x in line:
         aChess.move(x)

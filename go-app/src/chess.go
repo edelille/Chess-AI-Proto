@@ -134,7 +134,7 @@ func (c *ChessGame) getMoves(p PiecePosition) []PiecePosition {
 				res = append(res, PiecePosition{piece, position, Position{i + 1, j}})
 			}
 		} else {
-			if i == 1 && c.peekMove(color, i-2, j) {
+			if i == 6 && c.peekMove(color, i-2, j) {
 				res = append(res, PiecePosition{piece, position, Position{i - 2, j}})
 			}
 			if c.peekMove(color, i-1, j) {
@@ -279,7 +279,7 @@ func testChess() {
 
 	game.PrintBoard()
 
-	moves := game.getPossibleMoves('w')
+	moves := game.getPossibleMoves('b')
 
 	for _, x := range moves {
 		fmt.Println(x.ToCoords())

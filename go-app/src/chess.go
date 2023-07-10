@@ -98,7 +98,7 @@ type ChessGame struct {
 	ColorToMove byte
 
 	n, m          int
-	enPassantFlag bool
+	enPassantFlag int
 }
 
 func NewChessGame() *ChessGame {
@@ -187,6 +187,9 @@ func (c *ChessGame) getMoves(board [][]Piece, p PiecePosition) []PiecePosition {
 			if c.peekMoveMustCapture(board, color, i+1, j-1) {
 				res = append(res, PiecePosition{piece, position, Position{i + 1, j - 1}, true})
 			}
+			if i == 4 && abs(j-c.enPassantFlag) == 1 {
+				res = append(res, PiecePosition{piece, position, Position{i + 1, c.enPassantFlag}, true})
+			}
 		} else {
 			if i == 6 && c.peekMove(board, color, i-2, j, true) {
 				res = append(res, PiecePosition{piece, position, Position{i - 2, j}, false})
@@ -199,6 +202,9 @@ func (c *ChessGame) getMoves(board [][]Piece, p PiecePosition) []PiecePosition {
 			}
 			if c.peekMoveMustCapture(board, color, i-1, j-1) {
 				res = append(res, PiecePosition{piece, position, Position{i - 1, j - 1}, true})
+			}
+			if i == 3 && abs(j-c.enPassantFlag) == 1 {
+				res = append(res, PiecePosition{piece, position, Position{i - 1, c.enPassantFlag}, true})
 			}
 		}
 	case KNIGHT:
@@ -375,10 +381,22 @@ func (c *ChessGame) Move(s string) {
 		return
 	}
 
-	c.doMove(move.Position, move.Move)
+	c.doMove(move)
 	if c.ColorToMove == 'w' {
+		if s[1] == '4' {
+			c.enPassantFlag = 7 - int('h'-s[0])
+			fmt.Println("En Passant potentially possible from white: ", c.enPassantFlag)
+		} else {
+			c.enPassantFlag = -2
+		}
 		c.ColorToMove = 'b'
 	} else {
+		if s[1] == '5' {
+			c.enPassantFlag = 7 - int('h'-s[0])
+			fmt.Println("En Passant potentially possible from black: ", c.enPassantFlag)
+		} else {
+			c.enPassantFlag = -2
+		}
 		c.ColorToMove = 'w'
 	}
 
@@ -392,7 +410,19 @@ func (c *ChessGame) exitGame() {
 	fmt.Printf("\nGame has ended, %s has no more moves\n\n", string(c.ColorToMove))
 }
 
-func (c *ChessGame) doMove(from, to Position) {
+func (c *ChessGame) doMove(p PiecePosition) {
+	color, pType, from, to := p.Piece.Color, p.Piece.Type, p.Position, p.Move
+
+	// Catch case on en passant
+	if pType == PAWN && ((color == 'w' && from.i == 4) || (color == 'b' && from.i == 3)) &&
+		to.j == c.enPassantFlag {
+		c.Board[to.i][to.j] = c.Board[from.i][from.j]
+		c.Board[from.i][from.j] = Piece{Empty: true}
+		c.Board[from.i][to.j] = Piece{Empty: true}
+		c.enPassantFlag = -2
+		return
+	}
+
 	c.Board[to.i][to.j] = c.Board[from.i][from.j]
 	c.Board[from.i][from.j] = Piece{Empty: true}
 }
@@ -430,9 +460,13 @@ func testChess() {
 
 	enPassant := []string{
 		"e4",
-		"Na6",
+		"a5",
 		"e5",
 		"f5",
+		"Exf6",
+		"a4",
+		"b4",
+		"Axb3",
 	}
 
 	testMoves := enPassant

@@ -6,3 +6,6 @@ run:
 
 start:
 	./bin/output.o
+
+clear:
+	clear

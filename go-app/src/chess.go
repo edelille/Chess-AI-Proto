@@ -27,6 +27,23 @@ var (
 	KING = PieceType{
 		ToIcon: "K",
 	}
+	KNIGHT_MOVES = []Position{
+		{-2, 1},
+		{-2, -1},
+		{2, -1},
+		{2, 1},
+		{1, 2},
+		{1, -2},
+		{-1, 2},
+		{-1, -2},
+	}
+
+	DIAGONALS = []Position{
+		{1, 1}, {1, -1}, {-1, 1}, {-1, -1},
+	}
+	ORTHOGONALS = []Position{
+		{1, 0}, {-1, 0}, {0, 1}, {0, -1},
+	}
 )
 
 type PieceType struct {
@@ -43,14 +60,28 @@ type PiecePosition struct {
 	Piece    Piece
 	Position Position
 	Move     Position
+	Capture  bool
 }
 
 func (p *PiecePosition) ToCoords() string {
-	if p.Piece.Type == PAWN {
-		return fmt.Sprintf("%s%d", string(int('A'+p.Move.j)), p.Move.i+1)
+	capture := ""
+	if p.Capture {
+		capture = "x"
 	}
 
-	return fmt.Sprintf("%s%s%d", p.Piece.Type.ToIcon, string(int('a'+p.Move.j)), p.Move.i+1)
+	if p.Piece.Type == PAWN {
+		if p.Capture {
+			return fmt.Sprintf("%s%s%s%d",
+				string(int('A'+p.Position.j)),
+				capture,
+				string(int('a'+p.Move.j)),
+				p.Move.i+1,
+			)
+		}
+		return fmt.Sprintf("%s%d", string(int('a'+p.Move.j)), p.Move.i+1)
+	}
+
+	return fmt.Sprintf("%s%s%s%d", p.Piece.Type.ToIcon, capture, string(int('a'+p.Move.j)), p.Move.i+1)
 }
 
 type Position struct {
@@ -66,7 +97,8 @@ type ChessGame struct {
 	Board       [][]Piece
 	ColorToMove byte
 
-	n, m int
+	n, m          int
+	enPassantFlag bool
 }
 
 func NewChessGame() *ChessGame {
@@ -79,11 +111,23 @@ func NewChessGame() *ChessGame {
 }
 
 func (c *ChessGame) PrintBoard() {
-	n, m := len(c.Board), len(c.Board[0])
-
-	for i := n - 1; i >= 0; i-- {
-		for j := 0; j < m; j++ {
+	for i := c.n - 1; i >= 0; i-- {
+		for j := 0; j < c.m; j++ {
 			piece := c.Board[i][j]
+			if piece.Empty {
+				fmt.Printf("   ")
+			} else {
+				fmt.Printf(string(piece.Color) + piece.Type.ToIcon + " ")
+			}
+		}
+		fmt.Printf("\n")
+	}
+}
+
+func (c *ChessGame) printThisBoard(board [][]Piece) {
+	for i := c.n - 1; i >= 0; i-- {
+		for j := 0; j < c.m; j++ {
+			piece := board[i][j]
 			if piece.Empty {
 				fmt.Printf("  ")
 			} else {
@@ -94,32 +138,36 @@ func (c *ChessGame) PrintBoard() {
 	}
 }
 
-func (c *ChessGame) getAllPieces(d byte) []PiecePosition {
+func (c *ChessGame) getAllPieces(board [][]Piece, d byte) []PiecePosition {
 	res := []PiecePosition{}
-	n, m := len(c.Board), len(c.Board[0])
-
-	for i := 0; i < n; i++ {
-		for j := 0; j < m; j++ {
-			if !c.Board[i][j].Empty && c.Board[i][j].Color == d {
-				res = append(res, PiecePosition{c.Board[i][j], Position{i, j}, Position{}})
+	for i := 0; i < c.n; i++ {
+		for j := 0; j < c.m; j++ {
+			if !board[i][j].Empty && board[i][j].Color == d {
+				res = append(res, PiecePosition{Piece: c.Board[i][j], Position: Position{i, j}})
 			}
 		}
 	}
 	return res
 }
 
-func (c *ChessGame) getPossibleMoves(d byte) []PiecePosition {
-	pieces := c.getAllPieces(d)
+func (c *ChessGame) getPossibleMoves(board [][]Piece, d byte) []PiecePosition {
+	pieces := c.getAllPieces(board, d)
 
-	res := []PiecePosition{}
+	pre, res := []PiecePosition{}, []PiecePosition{}
 	for _, x := range pieces {
-		res = append(res, c.getMoves(x)...)
+		pre = append(pre, c.getMoves(board, x)...)
+	}
+
+	for _, x := range pre {
+		if c.peekBoard(x) {
+			res = append(res, x)
+		}
 	}
 
 	return res
 }
 
-func (c *ChessGame) getMoves(p PiecePosition) []PiecePosition {
+func (c *ChessGame) getMoves(board [][]Piece, p PiecePosition) []PiecePosition {
 	res := []PiecePosition{}
 
 	piece, color, position, i, j := p.Piece, p.Piece.Color, p.Position, p.Position.i, p.Position.j
@@ -127,52 +175,77 @@ func (c *ChessGame) getMoves(p PiecePosition) []PiecePosition {
 	switch p.Piece.Type {
 	case PAWN:
 		if color == 'w' {
-			if i == 1 && c.peekMove(color, i+2, j) {
-				res = append(res, PiecePosition{piece, position, Position{i + 2, j}})
+			if i == 1 && c.peekMove(board, color, i+2, j, true) {
+				res = append(res, PiecePosition{piece, position, Position{i + 2, j}, false})
 			}
-			if c.peekMove(color, i+1, j) {
-				res = append(res, PiecePosition{piece, position, Position{i + 1, j}})
+			if c.peekMove(board, color, i+1, j, true) {
+				res = append(res, PiecePosition{piece, position, Position{i + 1, j}, false})
+			}
+			if c.peekMoveMustCapture(board, color, i+1, j+1) {
+				res = append(res, PiecePosition{piece, position, Position{i + 1, j + 1}, true})
+			}
+			if c.peekMoveMustCapture(board, color, i+1, j-1) {
+				res = append(res, PiecePosition{piece, position, Position{i + 1, j - 1}, true})
 			}
 		} else {
-			if i == 6 && c.peekMove(color, i-2, j) {
-				res = append(res, PiecePosition{piece, position, Position{i - 2, j}})
+			if i == 6 && c.peekMove(board, color, i-2, j, true) {
+				res = append(res, PiecePosition{piece, position, Position{i - 2, j}, false})
 			}
-			if c.peekMove(color, i-1, j) {
-				res = append(res, PiecePosition{piece, position, Position{i - 1, j}})
+			if c.peekMove(board, color, i-1, j, true) {
+				res = append(res, PiecePosition{piece, position, Position{i - 1, j}, false})
+			}
+			if c.peekMoveMustCapture(board, color, i-1, j+1) {
+				res = append(res, PiecePosition{piece, position, Position{i - 1, j + 1}, true})
+			}
+			if c.peekMoveMustCapture(board, color, i-1, j-1) {
+				res = append(res, PiecePosition{piece, position, Position{i - 1, j - 1}, true})
 			}
 		}
 	case KNIGHT:
-		knightMoves := []Position{
-			{-2, 1},
-			{-2, -1},
-			{2, -1},
-			{2, 1},
-			{1, 2},
-			{1, -2},
-			{-1, 2},
-			{-1, -2},
-		}
-		for _, x := range knightMoves {
-			if c.peekMove(color, i+x.i, j+x.j) {
-				res = append(res, PiecePosition{piece, position, Position{i + x.i, j + x.j}})
+		for _, x := range KNIGHT_MOVES {
+			if c.peekMove(board, color, i+x.i, j+x.j, false) {
+				res = append(res, PiecePosition{piece, position, Position{i + x.i, j + x.j}, false})
 			}
 		}
 	case BISHOP:
-		res = append(res, c.getLinearMoves(piece, i, j, 1, 1)...)
-		res = append(res, c.getLinearMoves(piece, i, j, 1, -1)...)
-		res = append(res, c.getLinearMoves(piece, i, j, -1, 1)...)
-		res = append(res, c.getLinearMoves(piece, i, j, -1, -1)...)
+		for _, x := range DIAGONALS {
+			res = append(res, c.getLinearMoves(board, piece, i, j, x.i, x.j)...)
+		}
+	case ROOK:
+		for _, x := range ORTHOGONALS {
+			res = append(res, c.getLinearMoves(board, piece, i, j, x.i, x.j)...)
+		}
+	case QUEEN:
+		for _, x := range append(DIAGONALS, ORTHOGONALS...) {
+			res = append(res, c.getLinearMoves(board, piece, i, j, x.i, x.j)...)
+		}
+	case KING:
+		for _, x := range append(DIAGONALS, ORTHOGONALS...) {
+			if c.peekMove(board, color, i+x.i, j+x.j, false) {
+				res = append(res, PiecePosition{
+					piece,
+					position,
+					Position{i + x.i, j + x.j},
+					c.isCapture(board, color, i+x.i, j+x.j),
+				})
+			}
+		}
 	}
 
 	return res
 }
 
-func (c *ChessGame) getLinearMoves(piece Piece, i, j, k, l int) []PiecePosition {
+func (c *ChessGame) getLinearMoves(board [][]Piece, piece Piece, i, j, k, l int) []PiecePosition {
 	res := []PiecePosition{}
 	start := Position{i, j}
 	i, j = i+k, j+l
-	for i >= 0 && i < c.n && j >= 0 && j < c.m && (c.Board[i][j].Empty || c.Board[i][j].Color != piece.Color) {
-		res = append(res, PiecePosition{piece, start, Position{i, j}})
+	for i >= 0 && i < c.n && j >= 0 && j < c.m && (board[i][j].Empty || board[i][j].Color != piece.Color) {
+		if !board[i][j].Empty && c.isCapture(board, piece.Color, i, j) {
+			res = append(res, PiecePosition{piece, start, Position{i, j}, true})
+			break
+		}
+		res = append(res, PiecePosition{piece, start, Position{i, j}, false})
+
 		i += k
 		j += l
 	}
@@ -180,36 +253,143 @@ func (c *ChessGame) getLinearMoves(piece Piece, i, j, k, l int) []PiecePosition 
 	return res
 }
 
-func (c *ChessGame) peekMove(color byte, i, j int) bool {
-	n, m := len(c.Board), len(c.Board[0])
-	if i < 0 || j < 0 || i >= n || j >= m {
+func (c *ChessGame) getLinearLimit(board [][]Piece, piece Piece, i, j, k, l int) Position {
+	i, j = i, j
+	for i+k >= 0 && i+k < c.n && j+l >= 0 && j+l < c.m &&
+		(c.Board[i+k][j+l].Empty || c.Board[i+k][j+l].Color != piece.Color) {
+		i += k
+		j += l
+		if c.isCapture(board, piece.Color, i, j) {
+			break
+		}
+	}
+
+	return Position{i, j}
+}
+
+// returns true if the board is a legal position
+func (c *ChessGame) peekBoard(p PiecePosition) bool {
+	tempBoard := make([][]Piece, c.n)
+	for i, x := range c.Board {
+		tempBoard[i] = make([]Piece, c.m)
+		copy(tempBoard[i], x)
+	}
+
+	piece, color := p.Piece, p.Piece.Color
+
+	from, to := p.Position, p.Move
+	tempBoard[to.i][to.j] = tempBoard[from.i][from.j]
+	tempBoard[from.i][from.j] = Piece{Empty: true}
+
+	// find the king
+	var kp Position
+	for i := 0; i < c.n; i++ {
+		for j := 0; j < c.m; j++ {
+			if tempBoard[i][j].Type == KING && tempBoard[i][j].Color == c.ColorToMove {
+				kp = Position{i, j}
+				break
+			}
+		}
+	}
+
+	// Check king safety
+	for _, x := range ORTHOGONALS { // check orthoganals!
+		ll := c.getLinearLimit(tempBoard, piece, kp.i, kp.j, x.i, x.j)
+		adj := (abs(kp.i-ll.i) < 2) && (abs(kp.j-ll.j) < 2)
+		sq := tempBoard[ll.i][ll.j]
+		enemy := c.isCapture(tempBoard, color, ll.i, ll.j)
+		atk := sq.Type
+		if enemy && (adj && atk == KING) || atk == ROOK || atk == QUEEN {
+			return false
+		}
+	}
+	for _, x := range DIAGONALS {
+		ll := c.getLinearLimit(tempBoard, piece, kp.i, kp.j, x.i, x.j)
+		adj := (abs(kp.i-ll.i) < 2) && (abs(kp.j-ll.j) < 2)
+		sq := tempBoard[ll.i][ll.j]
+		enemy := c.isCapture(tempBoard, color, ll.i, ll.j)
+		atk := sq.Type
+		if enemy && (adj && atk == KING) || atk == BISHOP || atk == QUEEN {
+			return false
+		}
+		// Pawn checks
+		if enemy && (adj && atk == PAWN) &&
+			((color == 'w' && ll.i > kp.i) || (color == 'b' && ll.i < kp.i)) {
+			return false
+		}
+	}
+	for _, x := range KNIGHT_MOVES {
+		ksi, ksj := kp.i+x.i, kp.j+x.j
+		if ksi < 0 || ksi >= c.n || ksj < 0 || ksj >= c.m {
+			continue
+		}
+		atk := tempBoard[ksi][ksj].Type
+		enemy := c.isCapture(tempBoard, color, ksi, ksj)
+		if enemy && atk == KNIGHT {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (c *ChessGame) peekMove(board [][]Piece, color byte, i, j int, noCapture bool) bool {
+	if i < 0 || j < 0 || i >= c.n || j >= c.m {
 		return false
 	}
 
-	if c.Board[i][j].Empty || c.Board[i][j].Color != color {
+	if board[i][j].Empty || (!noCapture && board[i][j].Color != color) {
 		return true
 	}
 
 	return false
 }
 
-func (c *ChessGame) Move(s string) {
-	moves := c.getPossibleMoves(c.ColorToMove)
-
-	for _, x := range moves {
-		if x.ToCoords() == s {
-			c.doMove(x.Position, x.Move)
-			if c.ColorToMove == 'w' {
-				c.ColorToMove = 'b'
-			} else {
-				c.ColorToMove = 'w'
-			}
-			return
-		}
+func (c *ChessGame) peekMoveMustCapture(board [][]Piece, color byte, i, j int) bool {
+	if i < 0 || j < 0 || i >= c.n || j >= c.m || board[i][j].Empty || board[i][j].Color == color {
+		return false
 	}
 
-	fmt.Println("Nothing was moved :/")
+	return true
 
+}
+
+func (c *ChessGame) isCapture(board [][]Piece, color byte, i, j int) bool {
+	return !board[i][j].Empty &&
+		(board[i][j].Color == 'w' && color == 'b' ||
+			board[i][j].Color == 'b' && color == 'w')
+}
+
+func (c *ChessGame) Move(s string) {
+	moves := c.getPossibleMoves(c.Board, c.ColorToMove)
+
+	var move PiecePosition
+	found := false
+	for _, x := range moves {
+		if x.ToCoords() == s {
+			move = x
+			found = true
+		}
+	}
+	if !found {
+		return
+	}
+
+	c.doMove(move.Position, move.Move)
+	if c.ColorToMove == 'w' {
+		c.ColorToMove = 'b'
+	} else {
+		c.ColorToMove = 'w'
+	}
+
+	if len(c.getPossibleMoves(c.Board, c.ColorToMove)) == 0 {
+		c.exitGame()
+	}
+}
+
+func (c *ChessGame) exitGame() {
+	c.PrintBoard()
+	fmt.Printf("\nGame has ended, %s has no more moves\n\n", string(c.ColorToMove))
 }
 
 func (c *ChessGame) doMove(from, to Position) {
@@ -217,72 +397,51 @@ func (c *ChessGame) doMove(from, to Position) {
 	c.Board[from.i][from.j] = Piece{Empty: true}
 }
 
-func init() {
-	// Board Size
-	n, m := BOARD_SIZE, BOARD_SIZE
-	STARTING_BOARD = make([][]Piece, n)
-	for i := 0; i < n; i++ {
-		STARTING_BOARD[i] = make([]Piece, m)
-	}
-
-	// Initialize the starting board position
-	for i := 0; i < n; i++ {
-
-		piece := Piece{
-			Empty: true,
-		}
-
-		piece.Color = 'w'
-		if i > n/2 {
-			piece.Color = 'b'
-		}
-
-		for j := 0; j < m; j++ {
-			switch i {
-			case 0, n - 1:
-				piece.Empty = false
-				switch j {
-				case 0, m - 1:
-					piece.Type = ROOK
-				case 1, m - 2:
-					piece.Type = KNIGHT
-				case 2, m - 3:
-					piece.Type = BISHOP
-				case 3:
-					piece.Type = QUEEN
-				case 4:
-					piece.Type = KING
-				}
-			case 1, n - 2:
-				piece.Empty = false
-				piece.Type = PAWN
-			}
-			STARTING_BOARD[i][j] = piece
-		}
-	}
-}
-
 func testChess() {
 	fmt.Println("This is the testing chess main routine\n")
 
 	game := NewChessGame()
 
-	testMoves := []string{
-		"E4",
-		"E5",
-		"Bc4",
+	/*
+		scholarsMate := []string{
+			"E4",
+			"E5",
+			"Bc4",
+			"A6",
+			"Qf3",
+			"B6",
+			"Qxf7",
+		}
+
+		pawnCheckmate := []string{
+			"h4",
+			"g5",
+			"Hxg5",
+			"Na6",
+			"g6",
+			"Nb8",
+			"e4",
+			"Na6",
+			"Bc4",
+			"Nb8",
+			"Gxf7",
+		}
+	*/
+
+	enPassant := []string{
+		"e4",
+		"Na6",
+		"e5",
+		"f5",
 	}
+
+	testMoves := enPassant
 
 	for _, x := range testMoves {
 		game.Move(x)
 	}
 
+	moves := game.getPossibleMoves(game.Board, game.ColorToMove)
+	debugPrintMoves(moves)
 	game.PrintBoard()
-
-	moves := game.getPossibleMoves('b')
-
-	for _, x := range moves {
-		fmt.Println(x.ToCoords())
-	}
-
 }
